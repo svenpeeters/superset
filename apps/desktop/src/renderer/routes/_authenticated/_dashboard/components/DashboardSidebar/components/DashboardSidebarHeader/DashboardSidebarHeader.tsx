@@ -13,6 +13,7 @@ import {
 	LuClock,
 	LuFolderInput,
 	LuFolderPlus,
+	LuGauge,
 	LuLayers,
 	LuLayoutTemplate,
 	LuPlus,
@@ -23,6 +24,7 @@ import { useZoomFactor } from "renderer/hooks/useZoomFactor";
 import { useHotkeyDisplay } from "renderer/hotkeys";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { useFolderFirstImport } from "renderer/routes/_authenticated/_dashboard/components/AddRepositoryModals/hooks/useFolderFirstImport";
+import { UsageBadge } from "renderer/routes/_authenticated/_dashboard/components/DashboardSidebar/components/UsageBadge";
 import { NavigationControls } from "renderer/routes/_authenticated/_dashboard/components/NavigationControls";
 import { SidebarToggle } from "renderer/routes/_authenticated/_dashboard/components/SidebarToggle";
 import { OrganizationDropdown } from "renderer/routes/_authenticated/_dashboard/components/TopBar/components/OrganizationDropdown";
@@ -82,6 +84,7 @@ export function DashboardSidebarHeader({
 	const isWorkspacesListOpen = !!matchRoute({ to: "/v2-workspaces" });
 	const isTasksOpen = !!matchRoute({ to: "/tasks", fuzzy: true });
 	const isAutomationsOpen = !!matchRoute({ to: "/automations", fuzzy: true });
+	const isUsageOpen = !!matchRoute({ to: "/usage", fuzzy: true });
 	const { myFailedCount } = useFailedAutomations();
 
 	const {
@@ -99,6 +102,10 @@ export function DashboardSidebarHeader({
 
 	const handleAutomationsClick = () => {
 		navigate({ to: "/automations" });
+	};
+
+	const handleUsageClick = () => {
+		navigate({ to: "/usage" });
 	};
 
 	const handleTasksClick = () => {
@@ -195,6 +202,26 @@ export function DashboardSidebarHeader({
 					<TooltipTrigger asChild>
 						<button
 							type="button"
+							onClick={handleUsageClick}
+							className={cn(
+								"flex size-8 items-center justify-center rounded-md transition-colors",
+								isUsageOpen
+									? "bg-accent text-foreground"
+									: "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+							)}
+						>
+							<LuGauge className="size-4" />
+						</button>
+					</TooltipTrigger>
+					<TooltipContent side="right">Token Usage</TooltipContent>
+				</Tooltip>
+
+				<UsageBadge variant="collapsed" />
+
+				<Tooltip delayDuration={300}>
+					<TooltipTrigger asChild>
+						<button
+							type="button"
 							onClick={() => openModal()}
 							className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
 						>
@@ -273,7 +300,8 @@ export function DashboardSidebarHeader({
 					<SidebarToggle />
 					<NavigationControls />
 				</ZoomStable>
-				<ZoomStable enabled={isMac} className="ml-auto">
+				<ZoomStable enabled={isMac} className="ml-auto flex items-center gap-1">
+					<UsageBadge />
 					<ResourceConsumption surface="v2" />
 				</ZoomStable>
 			</div>
@@ -327,6 +355,20 @@ export function DashboardSidebarHeader({
 			>
 				<HiOutlineClipboardDocumentList className="size-4 shrink-0" />
 				<span className="flex-1 text-left">Tasks & PRs</span>
+			</button>
+
+			<button
+				type="button"
+				onClick={handleUsageClick}
+				className={cn(
+					"flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium transition-colors",
+					isUsageOpen
+						? "bg-accent text-foreground"
+						: "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+				)}
+			>
+				<LuGauge className="size-4 shrink-0" />
+				<span className="flex-1 text-left">Token Usage</span>
 			</button>
 
 			<div className="flex items-center gap-1">

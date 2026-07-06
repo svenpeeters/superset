@@ -287,6 +287,16 @@ export function initTray(): void {
 }
 
 /** Call on app quit */
+/** Shows the worst provider-usage percentage next to the tray icon (macOS). */
+export function setTrayUsageTitle(title: string): void {
+	if (process.platform !== "darwin") return;
+	try {
+		tray?.setTitle(title, { fontType: "monospacedDigit" });
+	} catch {
+		// Tray may not be initialized yet.
+	}
+}
+
 export function disposeTray(): void {
 	if (tray) {
 		tray.destroy();

@@ -39,6 +39,7 @@ import {
 	shutdownTanstackDbPersistence,
 } from "./lib/persistence/persistence";
 import { ensureProjectIconsDir, getProjectIconPath } from "./lib/project-icons";
+import { startProviderUsageBackground } from "./lib/provider-usage/background";
 import { initSentry } from "./lib/sentry";
 import {
 	prewarmTerminalRuntime,
@@ -408,6 +409,7 @@ if (!gotTheLock) {
 
 		try {
 			setupAgentHooks();
+			startProviderUsageBackground();
 		} catch (error) {
 			console.error("[main] Failed to set up agent hooks:", error);
 		}
