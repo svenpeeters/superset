@@ -45,6 +45,28 @@ const claudeConfigSchema = z.object({
 const usageBucketSchema = z.object({
 	utilization: z.number(),
 	resets_at: z.string().optional().nullable(),
+	is_enabled: z.boolean().optional().nullable(),
+});
+
+// Entries of the newer `limits` array; scoped weekly limits name the model
+// they apply to via scope.model.display_name (e.g. promotional model access).
+const limitEntrySchema = z.object({
+	kind: z.string().optional().nullable(),
+	group: z.string().optional().nullable(),
+	percent: z.number().optional().nullable(),
+	resets_at: z.string().optional().nullable(),
+	scope: z
+		.object({
+			model: z
+				.object({
+					id: z.string().optional().nullable(),
+					display_name: z.string().optional().nullable(),
+				})
+				.optional()
+				.nullable(),
+		})
+		.optional()
+		.nullable(),
 });
 
 interface KnownWindow {
@@ -58,6 +80,9 @@ const KNOWN_WINDOWS: Record<string, KnownWindow> = {
 	seven_day_opus: { label: "Weekly (Opus)", durationMs: 7 * DAY_MS },
 	seven_day_sonnet: { label: "Weekly (Sonnet)", durationMs: 7 * DAY_MS },
 	seven_day_oauth_apps: { label: "Weekly (apps)", durationMs: 7 * DAY_MS },
+	seven_day_routines: { label: "Weekly (routines)", durationMs: 7 * DAY_MS },
+	seven_day_cowork: { label: "Weekly (cowork)", durationMs: 7 * DAY_MS },
+	extra_usage: { label: "Extra usage (monthly)", durationMs: null },
 };
 
 interface ClaudeCredentials {
@@ -163,6 +188,57 @@ async function readClaudeEmail(): Promise<string | null> {
 	}
 }
 
+function parseResetsAt(resetsAt: string | null | undefined): number | null {
+	const ms = resetsAt ? Date.parse(resetsAt) : Number.NaN;
+	return Number.isFinite(ms) ? ms : null;
+}
+
+function slugify(value: string): string {
+	return value
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Maps entries of the `limits` array to windows. Only model-scoped weekly
+ * limits are used: account-wide ones duplicate the flat seven_day buckets.
+ */
+function mapScopedWeeklyLimits(limits: unknown): UsageWindow[] {
+	if (!Array.isArray(limits)) return [];
+
+	const windows: UsageWindow[] = [];
+	const seenIds = new Set<string>();
+	for (const value of limits) {
+		const entry = limitEntrySchema.safeParse(value);
+		if (!entry.success) continue;
+		const { kind, group, percent, resets_at, scope } = entry.data;
+		if (kind !== "weekly_scoped" || group !== "weekly") continue;
+		if (typeof percent !== "number" || !Number.isFinite(percent)) continue;
+		const modelName = scope?.model?.display_name?.trim();
+		if (!modelName) continue;
+		const identity = slugify(scope?.model?.id?.trim() || modelName);
+		if (
+			!identity ||
+			identity === "all-models" ||
+			identity.endsWith("-all-models")
+		) {
+			continue;
+		}
+		const id = `weekly_scoped_${identity}`;
+		if (seenIds.has(id)) continue;
+		seenIds.add(id);
+		windows.push({
+			id,
+			label: `Weekly (${modelName})`,
+			usedPercent: Math.min(100, Math.max(0, percent)),
+			resetsAt: parseResetsAt(resets_at),
+			windowDurationMs: 7 * DAY_MS,
+		});
+	}
+	return windows;
+}
+
 /** Maps the OAuth usage response's rate-limit buckets to usage windows. */
 export function mapClaudeUsageWindows(json: unknown): UsageWindow[] | null {
 	if (!json || typeof json !== "object") return null;
@@ -173,22 +249,27 @@ export function mapClaudeUsageWindows(json: unknown): UsageWindow[] | null {
 		if (!bucket.success || !Number.isFinite(bucket.data.utilization)) {
 			continue;
 		}
+		// extra_usage is a monthly credit budget; hide it unless enabled.
+		if (key === "extra_usage" && bucket.data.is_enabled === false) continue;
 		const known = KNOWN_WINDOWS[key];
-		const resetsAtMs = bucket.data.resets_at
-			? Date.parse(bucket.data.resets_at)
-			: Number.NaN;
 		windows.push({
 			id: key,
 			label: known?.label ?? humanizeBucketKey(key),
 			usedPercent: Math.min(100, Math.max(0, bucket.data.utilization)),
-			resetsAt: Number.isFinite(resetsAtMs) ? resetsAtMs : null,
+			resetsAt: parseResetsAt(bucket.data.resets_at),
 			windowDurationMs: known?.durationMs ?? null,
 		});
 	}
+	windows.push(...mapScopedWeeklyLimits((json as { limits?: unknown }).limits));
 	return windows.length > 0 ? windows : null;
 }
 
-const CLAUDE_TOKEN_URL = "https://console.anthropic.com/v1/oauth/token";
+// Claude Code refreshes against platform.claude.com; the console.anthropic.com
+// endpoint still works but is legacy, so keep it as a fallback only.
+const CLAUDE_TOKEN_URLS = [
+	"https://platform.claude.com/v1/oauth/token",
+	"https://console.anthropic.com/v1/oauth/token",
+];
 // Claude Code's public OAuth client id.
 const CLAUDE_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const REFRESH_RETRY_COOLDOWN_MS = 5 * 60_000;
@@ -205,31 +286,34 @@ async function refreshAccessToken(
 	const now = Date.now();
 	if (now - lastRefreshAttemptAt < REFRESH_RETRY_COOLDOWN_MS) return null;
 	lastRefreshAttemptAt = now;
-	try {
-		const response = await fetch(CLAUDE_TOKEN_URL, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({
-				grant_type: "refresh_token",
-				refresh_token: refreshToken,
-				client_id: CLAUDE_OAUTH_CLIENT_ID,
-			}),
-			signal,
-		});
-		if (!response.ok) return null;
-		const json = (await response.json()) as {
-			access_token?: string;
-			expires_in?: number;
-		};
-		if (!json.access_token) return null;
-		inMemoryToken = {
-			accessToken: json.access_token,
-			expiresAt: now + (json.expires_in ?? 3600) * 1000,
-		};
-		return inMemoryToken.accessToken;
-	} catch {
-		return null;
+	for (const tokenUrl of CLAUDE_TOKEN_URLS) {
+		try {
+			const response = await fetch(tokenUrl, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					grant_type: "refresh_token",
+					refresh_token: refreshToken,
+					client_id: CLAUDE_OAUTH_CLIENT_ID,
+				}),
+				signal,
+			});
+			if (!response.ok) continue;
+			const json = (await response.json()) as {
+				access_token?: string;
+				expires_in?: number;
+			};
+			if (!json.access_token) continue;
+			inMemoryToken = {
+				accessToken: json.access_token,
+				expiresAt: now + (json.expires_in ?? 3600) * 1000,
+			};
+			return inMemoryToken.accessToken;
+		} catch {
+			// Network error or abort — try the next endpoint.
+		}
 	}
+	return null;
 }
 
 async function resolveAccessToken(

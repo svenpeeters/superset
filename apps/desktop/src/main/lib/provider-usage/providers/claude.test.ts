@@ -39,6 +39,87 @@ describe("mapClaudeUsageWindows", () => {
 		expect(windows?.[0]?.usedPercent).toBe(100);
 	});
 
+	it("labels routines and cowork windows as weekly", () => {
+		const windows = mapClaudeUsageWindows({
+			seven_day_routines: { utilization: 8 },
+			seven_day_cowork: { utilization: 4 },
+		});
+		expect(windows?.[0]).toMatchObject({
+			label: "Weekly (routines)",
+			windowDurationMs: 7 * 24 * 60 * 60 * 1000,
+		});
+		expect(windows?.[1]).toMatchObject({
+			label: "Weekly (cowork)",
+			windowDurationMs: 7 * 24 * 60 * 60 * 1000,
+		});
+	});
+
+	it("shows extra usage only when enabled", () => {
+		expect(
+			mapClaudeUsageWindows({
+				extra_usage: { utilization: 40, is_enabled: true },
+			})?.[0],
+		).toMatchObject({ label: "Extra usage (monthly)", usedPercent: 40 });
+		expect(
+			mapClaudeUsageWindows({
+				extra_usage: { utilization: 0, is_enabled: false },
+			}),
+		).toBeNull();
+	});
+
+	it("maps model-scoped weekly limits and skips account-wide ones", () => {
+		const windows = mapClaudeUsageWindows({
+			five_hour: { utilization: 10 },
+			limits: [
+				{
+					kind: "weekly_scoped",
+					group: "weekly",
+					percent: 55,
+					resets_at: "2026-07-20T00:00:00+00:00",
+					scope: { model: { id: "claude-fable-5", display_name: "Fable" } },
+				},
+				{
+					kind: "weekly_scoped",
+					group: "weekly",
+					percent: 61,
+					scope: { model: { id: "all_models", display_name: "All models" } },
+				},
+				{ kind: "overall", group: "weekly", percent: 61 },
+				"garbage",
+			],
+		});
+
+		expect(windows).toHaveLength(2);
+		expect(windows?.[1]).toMatchObject({
+			id: "weekly_scoped_claude-fable-5",
+			label: "Weekly (Fable)",
+			usedPercent: 55,
+			resetsAt: Date.parse("2026-07-20T00:00:00+00:00"),
+			windowDurationMs: 7 * 24 * 60 * 60 * 1000,
+		});
+	});
+
+	it("dedupes scoped weekly limits by model identity", () => {
+		const windows = mapClaudeUsageWindows({
+			limits: [
+				{
+					kind: "weekly_scoped",
+					group: "weekly",
+					percent: 20,
+					scope: { model: { id: "claude-fable-5", display_name: "Fable" } },
+				},
+				{
+					kind: "weekly_scoped",
+					group: "weekly",
+					percent: 30,
+					scope: { model: { id: "claude-fable-5", display_name: "Fable" } },
+				},
+			],
+		});
+		expect(windows).toHaveLength(1);
+		expect(windows?.[0]?.usedPercent).toBe(20);
+	});
+
 	it("returns null for unrecognized payloads", () => {
 		expect(mapClaudeUsageWindows(null)).toBeNull();
 		expect(mapClaudeUsageWindows("nope")).toBeNull();
