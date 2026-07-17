@@ -5,6 +5,8 @@ import { AGENT_TYPES } from "@superset/shared/agent-command";
 import { SUPERSET_HOME_DIR } from "main/lib/app-environment";
 import { claudeUsageProvider } from "./providers/claude";
 import { codexUsageProvider } from "./providers/codex";
+import { copilotUsageProvider } from "./providers/copilot";
+import { geminiUsageProvider } from "./providers/gemini";
 import { createUnsupportedProvider } from "./providers/unsupported";
 import type {
 	ProviderUsage,
@@ -38,6 +40,8 @@ const FETCH_TIMEOUT_MS = 10_000;
 const implementedProviders: Partial<Record<AgentType, UsageProvider>> = {
 	claude: claudeUsageProvider,
 	codex: codexUsageProvider,
+	copilot: copilotUsageProvider,
+	gemini: geminiUsageProvider,
 };
 
 // Built from the shared agent registry so newly added agents automatically
