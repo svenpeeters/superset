@@ -192,11 +192,15 @@ export const copilotUsageProvider: UsageProvider = {
 
 		let response: Response;
 		try {
+			// GitHub gates this internal endpoint on Copilot-editor headers.
 			response = await fetch(COPILOT_USAGE_URL, {
 				headers: {
 					Authorization: `token ${credentials.token}`,
 					Accept: "application/json",
-					"User-Agent": "Superset",
+					"Editor-Version": "vscode/1.96.2",
+					"Editor-Plugin-Version": "copilot-chat/0.26.7",
+					"User-Agent": "GitHubCopilotChat/0.26.7",
+					"X-Github-Api-Version": "2025-04-01",
 				},
 				signal,
 			});
